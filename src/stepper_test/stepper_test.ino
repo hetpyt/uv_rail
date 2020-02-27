@@ -44,14 +44,141 @@
 #define RIGHT_OFFSET_MM         0 // (mm) offset from right endstop to right edge of canvas
 #define COL_SPACING_MM          4.6 // (mm) 
 #define COL_COUNT               50 // count of columns
-#define ROW_COUNT               16 // count of rows
-
+// data
+#define COL_LEN_BYTES           2 // length of column in bytes
+#define SYMBOL_WIDHT            10 // width of each symbol place in rows
+#define SYMBOL_COUNT            10 // 10 digits 0 - 9
 // precalculation (all in steps)
 #define MAX_DISTANCE            (MAX_DISTANCE_MM * STEP_DISTANCE)
 #define HOMING_DISTANCE         (HOMING_DISTANCE_MM * STEP_DISTANCE)
 #define LEFT_OFFSET             (LEFT_OFFSET_MM * STEP_DISTANCE) 
 #define RIGHT_OFFSET            (RIGHT_OFFSET_MM * STEP_DISTANCE)
 #define COL_SPACING             (COL_SPACING_MM * STEP_DISTANCE) 
+
+const uint8_t DIGITS[SYMBOL_COUNT][SYMBOL_WIDHT][COL_LEN_BYTES] PROGMEM = {
+{
+{0b00000000,0b00000000},
+{0b01111110,0b11111110},
+{0b10111100,0b01111101},
+{0b11000000,0b00000011},
+{0b11000000,0b00000011},
+{0b11000000,0b00000011},
+{0b11000000,0b00000011},
+{0b10111100,0b01111101},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00111100,0b01111100},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b00000000,0b11111110},
+{0b10000001,0b01111101},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10111101,0b00000001},
+{0b01111110,0b00000000},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b10000001,0b00000001},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10111101,0b01111101},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b01111110,0b00000000},
+{0b00111101,0b00000000},
+{0b00000011,0b10000000},
+{0b00000011,0b10000000},
+{0b00000011,0b10000000},
+{0b00000011,0b10000000},
+{0b00111101,0b01111100},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b01111110,0b00000000},
+{0b10111101,0b00000001},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10000001,0b01111101},
+{0b00000000,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b01111110,0b11111110},
+{0b10111101,0b01111101},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10000001,0b01111101},
+{0b00000000,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b10000000,0b00000000},
+{0b11000000,0b00000000},
+{0b11000000,0b00000000},
+{0b11000000,0b00000000},
+{0b11000000,0b00000000},
+{0b10111100,0b01111100},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b01111110,0b11111110},
+{0b10111101,0b01111101},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10111101,0b01111101},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}},
+{
+{0b00000000,0b00000000},
+{0b01111110,0b00000000},
+{0b10111101,0b00000001},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b11000011,0b10000011},
+{0b10111101,0b01111101},
+{0b01111110,0b11111110},
+{0b00000000,0b00000000}}};
+
+const uint8_t DOTS[10][2] PROGMEM = {
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00001000,0b00010000},
+{0b00011100,0b00111000},
+{0b00011100,0b00111000},
+{0b00001000,0b00010000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000},
+{0b00000000,0b00000000}};
+
 
 A4988 _stepper(MOTOR_STEPS, DIR, STEP, ENABLE); 
 DS3231M_Class DS3231M; 
@@ -62,6 +189,7 @@ uint16_t _col_steps_left = 0; // steps left before netxt column
 int8_t _moving_direction = DIR_NONE;
 
 uint8_t _last_minute = 99;
+uint8_t _buffer[COL_COUNT][COL_LEN_BYTES];
 uint8_t _test_data[] = {0b11111111, 0b11111111};
 
 // #include "BasicStepperDriver.h" // generic
@@ -98,9 +226,9 @@ void setup() {
     } 
 }
 
-void mbi_send_data(byte data[]) {
+void mbi_send_data(uint8_t data[], uint8_t lenght) {
   digitalWrite(MBI_LE, LOW);
-  for (int i = 0; i < 1; i++) {
+  for (uint8_t i = 0; i < lenght; i++) {
     shiftOut(MBI_SDI, MBI_CLK, MSBFIRST, data[i]);
   }
   digitalWrite(MBI_LE, HIGH);
@@ -147,6 +275,14 @@ void begin_print() {
     }
 }
 
+void load_symbol(uint8_t s_num, uint8_t pos) {
+  for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
+    for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
+      _buffer[pos + col][] = pgm_read_byte(&DIGITS[s_num][col][bt])
+    }
+  }
+}
+
 void loop() {
     // checking endstops
     if (_moving_direction == DIR_RIGHT && digitalRead(STOPPER_RIGHT_PIN) == LOW) {
@@ -186,9 +322,28 @@ void loop() {
     else if (_moving_direction == DIR_NONE) {
         // not moving - can make things
         DateTime now = DS3231M.now();
-        if (_last_minute != now.minute() && 0 == now.second()) {
+        uint8_t minute = now.minute();
+        if (_last_minute != minute && 0 == now.second()) {
+            _last_minute = minute;
+            uint8_t hour = now.hour();
+            //TODO fill buffer
+            uint8_t pos = 0;
+            uint8_t digit = hour / 10;
+            load_symbol(digit, pos);
+            
+            pos += SYMBOL_WIDHT;
+            digit = hour % 10;
+            load_symbol(digit, pos);
+
+            pos += SYMBOL_WIDHT;
+            digit = minute / 10;
+            load_symbol(digit, pos);
+
+            pos += SYMBOL_WIDHT;
+            digit = minute % 10;
+            load_symbol(digit, pos);
+                        
             begin_print();
-            _last_minute = now.minute();
         }
     }
       
@@ -208,7 +363,7 @@ void loop() {
     
     if (++_col_steps_left == 0) {
         // print next column
-        mbi_send_data(_test_data);
+        mbi_send_data(_test_data, COL_LEN_BYTES);
         // set new offset
         _col_steps_left = COL_SPACING;
     }
