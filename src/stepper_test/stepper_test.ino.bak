@@ -27,7 +27,7 @@
 
 // Motor steps per revolution. Most steppers are 200 steps or 1.8 degrees/step
 #define MOTOR_STEPS 200
-#define RPM         60
+#define RPM         10
 #define HOMING_RPM  120
 // Microstepping mode. If you hardwired it to save pins, set to the same value here.
 #define MICROSTEPS 16
@@ -41,18 +41,15 @@
 #define STEP_DISTANCE           80 // 1 / 0.0125F  mm per motor step
 #define MAX_DISTANCE_MM         340 // (mm) actual distance between endstops is 340 mm
 #define HOMING_DISTANCE_MM      (MAX_DISTANCE_MM + 5) // (mm) 
-#define LEFT_OFFSET_MM          55 // (mm) offset from left endstop to left edge of canvas 
-#define RIGHT_OFFSET_MM         50 // (mm) offset from right endstop to right edge of canvas
+#define LEFT_OFFSET_MM          0 // (mm) offset from left endstop to left edge of canvas 
+#define RIGHT_OFFSET_MM         0 // (mm) offset from right endstop to right edge of canvas
 #define COL_SPACING_MM          4.6 // (mm) 
 #define COL_COUNT               50 // count of columns
 // data
 #define COL_LEN_BYTES           2 // length of column in bytes
 #define SYMBOL_WIDHT            10 // width of each symbol place in rows
 #define SYMBOL_COUNT            11 // 10 digits 0 - 9, : (colon)
-#define SYMBOL_DATA_LEN         5 // COL_COUNT / SYMBOL_WIDHT
 #define SYM_COLON               10 // index of colon symbol in SIMBOLS
-// timings
-#define FLARE_DELAY             15 // ms
 // precalculation (all in steps)
 #define MAX_DISTANCE            (MAX_DISTANCE_MM * STEP_DISTANCE)
 #define HOMING_DISTANCE         (HOMING_DISTANCE_MM * STEP_DISTANCE)
@@ -188,17 +185,14 @@ const uint8_t SYMBOLS[SYMBOL_COUNT][SYMBOL_WIDHT][COL_LEN_BYTES] PROGMEM = {
 A4988 _stepper(MOTOR_STEPS, DIR, STEP, ENABLE); 
 DS3231M_Class DS3231M; 
 
-char          inputBuffer[32];
-
 int8_t _state = 0;
+int16_t _col_steps_left = 0; // steps left before netxt column
+uint8_t _col_index = 0; // index of column to print
 int8_t _moving_direction = DIR_NONE;
 
 uint8_t _last_minute = 99;
-uint8_t _buffer_len = 0;
-int8_t _buffer_index = 0; // index of buffer
-uint8_t _buffer[COL_COUNT][COL_LEN_BYTES]; // display buffer
-uint8_t _next_col_dist[COL_COUNT]; // distances in steps to next not zero filled column
-uint8_t _data[5] = {0, 0, 0, 0, 0}; // symbol numbers to fill in buffer
+uint8_t _buffer[COL_COUNT][COL_LEN_BYTES];
+uint8_t _test_data[] = {0b11111111, 0b11111111};
 
 // #include "BasicStepperDriver.h" // generic
 // BasicStepperDriver stepper(DIR, STEP);
@@ -236,9 +230,8 @@ void setup() {
 
 void mbi_send_data(uint8_t data[], uint8_t lenght) {
     digitalWrite(MBI_LE, LOW);
-    for (uint8_t i = lenght; i > 0; i--) {
-        //shiftOut(MBI_SDI, MBI_CLK, MSBFIRST, data[i]);
-        shiftOut(MBI_SDI, MBI_CLK, LSBFIRST , data[i-1]);
+    for (uint8_t i = 0; i < lenght; i++) {
+        shiftOut(MBI_SDI, MBI_CLK, MSBFIRST, data[i]);
     }
     // store data
     digitalWrite(MBI_LE, HIGH);
@@ -261,7 +254,6 @@ void start_move(long steps, int8_t dir) {
 
 void stop_move() {
     _stepper.stop();
-    _stepper.disable();
     _moving_direction = DIR_NONE;
 }
 
@@ -269,72 +261,71 @@ void begin_homing_cycle() {
     // move right to reach endstop
     _state = 1; // homing
     //mbi_send_data(_test_data, 2);
-    start_move(HOMING_DISTANCE, DIR_LEFT);
+    start_move(HOMING_DISTANCE, DIR_RIGHT);
 }
 
 void begin_print() {
     // check for error state
     if (_state < 0) return;
     
-    if (digitalRead(STOPPER_RIGHT_PIN) != LOW){
+    if (digitalRead(STOPPER_LEFT_PIN) != LOW){
         // need to go left homing
         _state = 3;
-        start_move(HOMING_DISTANCE, DIR_RIGHT);
+        start_move(HOMING_DISTANCE, DIR_LEFT);
     }
     else {
         // already at left home position - can print
         _state = 4;
-        _buffer_index = 0;
-        start_move(RIGHT_OFFSET + _next_col_dist[_buffer_index] * COL_SPACING, DIR_LEFT);
+        _col_steps_left = LEFT_OFFSET;
+        _col_index = 0;
+        start_move(HOMING_DISTANCE, DIR_RIGHT);
     }
 }
 
-void fill_buffer() {
-    _buffer_len = 0;
-    uint8_t empty_cols = 0;
-    for (uint8_t dt = 0; dt < SYMBOL_DATA_LEN; dt++) {
-        for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
-            uint8_t nonzero_col = 0;
-            for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
-                uint8_t dbyte = pgm_read_byte(&SYMBOLS[_data[SYMBOL_DATA_LEN - 1 - dt]][SYMBOL_WIDHT - 1 - col][bt]);
-                _buffer[_buffer_len][bt] = dbyte;
-                if (dbyte) nonzero_col++;
-            }
-            if (nonzero_col) {
-//                Serial.print(_buffer_len, DEC);
-//                Serial.print("\t");
-//                Serial.print(empty_cols, DEC);
-//                Serial.print("\n");
-                _next_col_dist[_buffer_len] = empty_cols + 1;
-                empty_cols = 0;
-                _buffer_len++; // if not all bytes in col is zero then increase index
-            }
-            else {
-                empty_cols++;
-            }
-        }
+void load_symbol(uint8_t s_num, uint8_t pos) {
+  for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
+    for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
+      _buffer[pos + col][bt] = pgm_read_byte(&SYMBOLS[s_num][col][bt]);
     }
-    if (empty_cols) _next_col_dist[_buffer_len - 1] = empty_cols;
+  }
 }
 
 void loop() {
     // checking endstops
-    if (_moving_direction == DIR_LEFT && digitalRead(STOPPER_LEFT_PIN) == LOW) {
-        // right endstop triggered
-        stop_move();  
-        // homing to left side
-        //digitalWrite(MBI_OE, HIGH);
-        _state = 2;
-        start_move(HOMING_DISTANCE, DIR_RIGHT);
+    if (_moving_direction == DIR_RIGHT) {
+        if (digitalRead(STOPPER_RIGHT_PIN) == LOW) {
+            // right endstop triggered
+            stop_move();  
+            // homing to left side
+            //digitalWrite(MBI_OE, HIGH);
+            _state = 2;
+            start_move(HOMING_DISTANCE, DIR_LEFT);
+        }
+        else {
+            // no endstop - keep moving
+            if (_state == 4) {
+                // printing
+                if (_col_steps_left <= 0) {
+                    // print next column
+                    //Serial.println("on");
+                    mbi_send_data(_buffer[_col_index++], COL_LEN_BYTES);
+                    // set new offset
+                    _col_steps_left = COL_SPACING;
+                    //Serial.println("off");
+                    delay(1 );
+                    digitalWrite(MBI_OE, HIGH);
+                }
+            }
+            
+        }
     }
-    else if (_moving_direction == DIR_RIGHT && digitalRead(STOPPER_RIGHT_PIN) == LOW) {
+    else if (_moving_direction == DIR_LEFT && digitalRead(STOPPER_LEFT_PIN) == LOW) {
         stop_move(); 
         switch (_state) {
             case 2:
                 // end of homing - all ok
                 _stepper.begin(RPM, MICROSTEPS);
                 _state = 0;
-                //_stepper.disable();
                 break;
 
             case 3:
@@ -343,7 +334,6 @@ void loop() {
                 break;
             default:
                 _state = 0;
-                //_stepper.disable();
                 break;
         }
          
@@ -353,43 +343,30 @@ void loop() {
         DateTime now = DS3231M.now();
         uint8_t minute = now.minute();
         if (_last_minute != minute && 0 == now.second()) {
-            //Serial.println("print");
-            sprintf(inputBuffer,"%04d-%02d-%02d %02d:%02d:%02d", now.year(),          // Use sprintf() to pretty print    //
-            now.month(), now.day(), now.hour(), now.minute(), now.second());  // date/time with leading zeros     //
-            Serial.println(inputBuffer);                                              // Display the current date/time    //
-
+            Serial.println("print");
             _last_minute = minute;
             uint8_t hour = now.hour();
             //fill buffer
             // hour
             uint8_t pos = 0;
             uint8_t digit = hour / 10;
-            //load_symbol(digit, pos);
-            _data[0] = digit;
+            load_symbol(digit, pos);
             
             pos += SYMBOL_WIDHT;
             digit = hour % 10;
-            //load_symbol(digit, pos);
-            _data[1] = digit;
-            
+            load_symbol(digit, pos);
             // colon
             pos += SYMBOL_WIDHT;
-            //load_symbol(SYM_COLON, pos);
-            _data[2] = SYM_COLON;
-            
+            load_symbol(SYM_COLON, pos);
             // minute
             pos += SYMBOL_WIDHT;
             digit = minute / 10;
-            //load_symbol(digit, pos);
-            _data[3] = digit;
-            
+            load_symbol(digit, pos);
 
             pos += SYMBOL_WIDHT;
             digit = minute % 10;
-            //load_symbol(digit, pos);
-            _data[4] = digit;
-            
-            fill_buffer();            
+            load_symbol(digit, pos);
+                        
             begin_print();
         }
     }
@@ -398,30 +375,15 @@ void loop() {
     unsigned wait_time_micros = _stepper.nextAction();
     // 0 wait time indicates the motor has stopped
     if (wait_time_micros <= 0) {
-        if (_state == 4) {
-                // printing
-                mbi_send_data(_buffer[_buffer_index++], COL_LEN_BYTES);
-                delay(FLARE_DELAY);
-                digitalWrite(MBI_OE, HIGH);
-                if (_buffer_index < _buffer_len) {
-                    // go to next column
-                    start_move(_next_col_dist[_buffer_index] * COL_SPACING, DIR_LEFT);
-                }
-                else {
-                    // go left home
-                    _stepper.begin(HOMING_RPM, MICROSTEPS);
-                    start_move(HOMING_DISTANCE, DIR_RIGHT);
-                    
-                }
-        }
-        else if (_state) {
-            _stepper.disable();       // comment out to keep motor powered
+        _stepper.disable();       // comment out to keep motor powered
+        if (_state) {
             // error state - no endstop triggered before distance ended
-            //Serial.println("ERROR");
+            Serial.println("ERROR");
             _state = -1;
-            
         }
     }
+    
+    _col_steps_left--;
     
     // (optional) execute other code if we have enough time
     //if (wait_time_micros > 100){
