@@ -32,7 +32,7 @@
 // Microstepping mode. If you hardwired it to save pins, set to the same value here.
 #define MICROSTEPS 16
 // invertion of moving direction if defined
-#define INVERT_DIRECTION 1
+//#define INVERT_DIRECTION 1
 // direction aliases
 #define DIR_RIGHT   1
 #define DIR_LEFT    -1
@@ -42,7 +42,7 @@
 #define MAX_DISTANCE_MM         340 // (mm) actual distance between endstops is 340 mm
 #define HOMING_DISTANCE_MM      (MAX_DISTANCE_MM + 5) // (mm) 
 #define LEFT_OFFSET_MM          55 // (mm) offset from left endstop to left edge of canvas 
-#define RIGHT_OFFSET_MM         50 // (mm) offset from right endstop to right edge of canvas
+#define RIGHT_OFFSET_MM         51 // (mm) offset from right endstop to right edge of canvas
 #define COL_SPACING_MM          4.6 // (mm) 
 #define COL_COUNT               50 // count of columns
 // data
@@ -188,10 +188,12 @@ const uint8_t SYMBOLS[SYMBOL_COUNT][SYMBOL_WIDHT][COL_LEN_BYTES] PROGMEM = {
 A4988 _stepper(MOTOR_STEPS, DIR, STEP, ENABLE); 
 DS3231M_Class DS3231M; 
 
-char          inputBuffer[32];
+char inputBuffer[32];
 
 int8_t _state = 0;
 int8_t _moving_direction = DIR_NONE;
+int8_t _print_direction = DIR_RIGHT;
+uint16_t _steps_moved = 0;
 
 uint8_t _last_minute = 99;
 uint8_t _buffer_len = 0;
@@ -234,7 +236,7 @@ void setup() {
     } 
 }
 
-void mbi_send_data(uint8_t data[], uint8_t lenght) {
+void light_column(uint8_t data[], uint8_t lenght) {
     digitalWrite(MBI_LE, LOW);
     for (uint8_t i = lenght; i > 0; i--) {
         //shiftOut(MBI_SDI, MBI_CLK, MSBFIRST, data[i]);
@@ -247,10 +249,47 @@ void mbi_send_data(uint8_t data[], uint8_t lenght) {
     //delayMicroseconds(1);
     // turn leds on
     digitalWrite(MBI_OE, LOW);
+    delay(FLARE_DELAY);
+    digitalWrite(MBI_OE, HIGH);
+}
+
+void fill_buffer() {
+    _buffer_len = 0;
+    uint8_t empty_cols = 0;
+    for (uint8_t dt = 0; dt < SYMBOL_DATA_LEN; dt++) {
+        for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
+            uint8_t nonzero_col = 0;
+            for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
+                uint8_t dbyte;
+                if (_print_direction == DIR_RIGHT) {
+                    dbyte = pgm_read_byte(&SYMBOLS[_data[dt]][col][bt]);
+                }
+                else {
+                    dbyte = pgm_read_byte(&SYMBOLS[_data[SYMBOL_DATA_LEN - 1 - dt]][SYMBOL_WIDHT - 1 - col][bt]);
+                }
+                _buffer[_buffer_len][bt] = dbyte;
+                if (dbyte) nonzero_col++;
+            }
+            if (nonzero_col) {
+//                Serial.print(_buffer_len, DEC);
+//                Serial.print("\t");
+//                Serial.print(empty_cols, DEC);
+//                Serial.print("\n");
+                _next_col_dist[_buffer_len] = empty_cols + 1;
+                empty_cols = 0;
+                _buffer_len++; // if not all bytes in col is zero then increase index
+            }
+            else {
+                empty_cols++;
+            }
+        }
+    }
+    if (empty_cols) _next_col_dist[_buffer_len] = empty_cols;
 }
 
 void start_move(long steps, int8_t dir) {
     _moving_direction = dir;
+    _steps_moved = 0;
     _stepper.enable();
 #ifdef INVERT_DIRECTION
     _stepper.startMove(-steps * dir);
@@ -269,84 +308,71 @@ void begin_homing_cycle() {
     // move right to reach endstop
     _state = 1; // homing
     //mbi_send_data(_test_data, 2);
-    start_move(HOMING_DISTANCE, DIR_LEFT);
+    
+    start_move(HOMING_DISTANCE, DIR_RIGHT);
+}
+
+int8_t set_print_direction() {
+    if (digitalRead(STOPPER_RIGHT_PIN) == LOW) _print_direction = DIR_LEFT;
+    else if (digitalRead(STOPPER_LEFT_PIN) == LOW) _print_direction = DIR_RIGHT;
+    else _print_direction = DIR_NONE;
 }
 
 void begin_print() {
     // check for error state
     if (_state < 0) return;
-    
-    if (digitalRead(STOPPER_RIGHT_PIN) != LOW){
-        // need to go left homing
+
+    set_print_direction();
+
+    if (_print_direction == DIR_NONE){
+        // need to go home
         _state = 3;
-        start_move(HOMING_DISTANCE, DIR_RIGHT);
+        start_move(HOMING_DISTANCE, DIR_LEFT);
     }
     else {
-        // already at left home position - can print
+        // already at home position - can print
+        fill_buffer();            
         _state = 4;
         _buffer_index = 0;
-        start_move(RIGHT_OFFSET + _next_col_dist[_buffer_index] * COL_SPACING, DIR_LEFT);
+        _stepper.begin(RPM, MICROSTEPS);
+        start_move((_print_direction == DIR_RIGHT ? LEFT_OFFSET : RIGHT_OFFSET) + _next_col_dist[_buffer_index] * COL_SPACING, _print_direction);
     }
 }
 
-void fill_buffer() {
-    _buffer_len = 0;
-    uint8_t empty_cols = 0;
-    for (uint8_t dt = 0; dt < SYMBOL_DATA_LEN; dt++) {
-        for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
-            uint8_t nonzero_col = 0;
-            for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
-                uint8_t dbyte = pgm_read_byte(&SYMBOLS[_data[SYMBOL_DATA_LEN - 1 - dt]][SYMBOL_WIDHT - 1 - col][bt]);
-                _buffer[_buffer_len][bt] = dbyte;
-                if (dbyte) nonzero_col++;
-            }
-            if (nonzero_col) {
-//                Serial.print(_buffer_len, DEC);
-//                Serial.print("\t");
-//                Serial.print(empty_cols, DEC);
-//                Serial.print("\n");
-                _next_col_dist[_buffer_len] = empty_cols + 1;
-                empty_cols = 0;
-                _buffer_len++; // if not all bytes in col is zero then increase index
-            }
-            else {
-                empty_cols++;
-            }
-        }
-    }
-    if (empty_cols) _next_col_dist[_buffer_len - 1] = empty_cols;
-}
 
 void loop() {
     // checking endstops
-    if (_moving_direction == DIR_LEFT && digitalRead(STOPPER_LEFT_PIN) == LOW) {
-        // right endstop triggered
-        stop_move();  
-        // homing to left side
-        //digitalWrite(MBI_OE, HIGH);
-        _state = 2;
-        start_move(HOMING_DISTANCE, DIR_RIGHT);
-    }
-    else if (_moving_direction == DIR_RIGHT && digitalRead(STOPPER_RIGHT_PIN) == LOW) {
-        stop_move(); 
+    if (_moving_direction == DIR_RIGHT && digitalRead(STOPPER_RIGHT_PIN) == LOW) {
+        stop_move(); // reset _moving_direction 
         switch (_state) {
-            case 2:
-                // end of homing - all ok
-                _stepper.begin(RPM, MICROSTEPS);
-                _state = 0;
-                //_stepper.disable();
+            case 1:
+                // homing stage #1
+                _state = 2;
+                Serial.println("home1");
+                start_move(HOMING_DISTANCE, DIR_LEFT); // go homing stage #2
                 break;
-
             case 3:
-                // homing left before printing
+                // homing before print
+                Serial.println("print3<-");
                 begin_print();
                 break;
-            default:
-                _state = 0;
-                //_stepper.disable();
+        }
+    }
+    else if (_moving_direction == DIR_LEFT && digitalRead(STOPPER_LEFT_PIN) == LOW) {
+        stop_move(); // reset _moving_direction 
+        switch (_state) {
+            case 2:
+                // homing stage #2
+                _state = 0; // homing cycle done
+                Serial.println("home2");
+                break;
+            case 3:
+                // homing before print
+                Serial.println("print3->");
+                begin_print();
                 break;
         }
-         
+        
     }
     else if (_moving_direction == DIR_NONE) {
         // not moving - can make things
@@ -388,41 +414,39 @@ void loop() {
             digit = minute % 10;
             //load_symbol(digit, pos);
             _data[4] = digit;
-            
-            fill_buffer();            
+
             begin_print();
         }
     }
-      
-    // motor control loop - send pulse and return how long to wait until next pulse
-    unsigned wait_time_micros = _stepper.nextAction();
-    // 0 wait time indicates the motor has stopped
-    if (wait_time_micros <= 0) {
-        if (_state == 4) {
-                // printing
-                mbi_send_data(_buffer[_buffer_index++], COL_LEN_BYTES);
-                delay(FLARE_DELAY);
-                digitalWrite(MBI_OE, HIGH);
-                if (_buffer_index < _buffer_len) {
-                    // go to next column
-                    start_move(_next_col_dist[_buffer_index] * COL_SPACING, DIR_LEFT);
-                }
-                else {
-                    // go left home
-                    _stepper.begin(HOMING_RPM, MICROSTEPS);
-                    start_move(HOMING_DISTANCE, DIR_RIGHT);
-                    
-                }
-        }
-        else if (_state) {
-            _stepper.disable();       // comment out to keep motor powered
-            // error state - no endstop triggered before distance ended
-            //Serial.println("ERROR");
-            _state = -1;
-            
+    else {  
+        // motor control loop - send pulse and return how long to wait until next pulse
+        unsigned wait_time_micros = _stepper.nextAction();
+        _steps_moved++;
+        // 0 wait time indicates the motor has stopped
+        if (wait_time_micros == 0) {
+            if (_state == 4) {
+                    // printing
+                    light_column(_buffer[_buffer_index], COL_LEN_BYTES);
+                    _buffer_index++;
+                    if (_buffer_index < _buffer_len) {
+                        start_move(_next_col_dist[_buffer_index] * COL_SPACING, _moving_direction);
+                    }
+                    else {
+                        // go left home
+                        _stepper.begin(HOMING_RPM, MICROSTEPS);
+                        start_move(HOMING_DISTANCE - _steps_moved, _moving_direction);
+                        
+                    }
+            }
+            else if (_state) {
+                _stepper.disable();       // comment out to keep motor powered
+                // error state - no endstop triggered before distance ended
+                //Serial.println("ERROR");
+               // _state = -1;
+                
+            }
         }
     }
-    
     // (optional) execute other code if we have enough time
     //if (wait_time_micros > 100){
         // other code here
