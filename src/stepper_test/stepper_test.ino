@@ -27,8 +27,8 @@
 
 // Motor steps per revolution. Most steppers are 200 steps or 1.8 degrees/step
 #define MOTOR_STEPS 200
-#define RPM         60
-#define HOMING_RPM  120
+#define RPM         160 //120//60
+#define HOMING_RPM  160 //120
 // Microstepping mode. If you hardwired it to save pins, set to the same value here.
 #define MICROSTEPS 16
 // invertion of moving direction if defined
@@ -60,6 +60,8 @@
 #define RIGHT_OFFSET            (RIGHT_OFFSET_MM * STEP_DISTANCE)
 #define COL_SPACING             (COL_SPACING_MM * STEP_DISTANCE) 
 // macro
+#define LED_ON()  digitalWrite(MBI_OE, LOW);
+#define LED_OFF() digitalWrite(MBI_OE, HIGH);
 
 const uint8_t SYMBOLS[SYMBOL_COUNT][SYMBOL_WIDHT][COL_LEN_BYTES] PROGMEM = {
 {
@@ -217,23 +219,26 @@ void setup() {
     pinMode(MBI_CLK, OUTPUT);
     pinMode(MBI_SDI, OUTPUT);
     // disable output
-    digitalWrite(MBI_OE, HIGH); 
+    //digitalWrite(MBI_OE, HIGH); 
+    LED_OFF();
 
     _stepper.begin(HOMING_RPM, MICROSTEPS);
-    _stepper.setSpeedProfile(A4988::LINEAR_SPEED, 500, 500);
+    _stepper.setSpeedProfile(A4988::LINEAR_SPEED, 700, 700);
+    //_stepper.setSpeedProfile(A4988::CONSTANT_SPEED, 500, 500);
     // if using enable/disable on ENABLE pin (active LOW) instead of SLEEP uncomment next line
     _stepper.setEnableActiveState(LOW);
     //_stepper.enable();
 
     Serial.println("START");
-
-    // begin homing cycle
-    begin_homing_cycle();
     
     // init RTC
     while (!DS3231M.begin()) {                                                  
         delay(3000);                                                              
     } 
+    
+    // begin homing cycle
+    begin_homing_cycle();
+    
 }
 
 void light_column(uint8_t data[], uint8_t lenght) {
@@ -248,17 +253,17 @@ void light_column(uint8_t data[], uint8_t lenght) {
     digitalWrite(MBI_LE, LOW);
     //delayMicroseconds(1);
     // turn leds on
-    digitalWrite(MBI_OE, LOW);
-    delay(FLARE_DELAY);
-    digitalWrite(MBI_OE, HIGH);
+    //digitalWrite(MBI_OE, LOW);
+    //delay(FLARE_DELAY);
+    //digitalWrite(MBI_OE, HIGH);
 }
 
 void fill_buffer() {
     _buffer_len = 0;
-    uint8_t empty_cols = 0;
+    //uint8_t empty_cols = 0;
     for (uint8_t dt = 0; dt < SYMBOL_DATA_LEN; dt++) {
         for (uint8_t col = 0; col < SYMBOL_WIDHT; col++) {
-            uint8_t nonzero_col = 0;
+            //uint8_t nonzero_col = 0;
             for (uint8_t bt = 0; bt < COL_LEN_BYTES; bt++) {
                 uint8_t dbyte;
                 if (_print_direction == DIR_RIGHT) {
@@ -268,23 +273,24 @@ void fill_buffer() {
                     dbyte = pgm_read_byte(&SYMBOLS[_data[SYMBOL_DATA_LEN - 1 - dt]][SYMBOL_WIDHT - 1 - col][bt]);
                 }
                 _buffer[_buffer_len][bt] = dbyte;
-                if (dbyte) nonzero_col++;
+                //if (dbyte) nonzero_col++;
             }
-            if (nonzero_col) {
+            _buffer_len++;
+//            if (nonzero_col) {
 //                Serial.print(_buffer_len, DEC);
 //                Serial.print("\t");
 //                Serial.print(empty_cols, DEC);
 //                Serial.print("\n");
-                _next_col_dist[_buffer_len] = empty_cols + 1;
-                empty_cols = 0;
-                _buffer_len++; // if not all bytes in col is zero then increase index
-            }
-            else {
-                empty_cols++;
-            }
+//                _next_col_dist[_buffer_len] = empty_cols + 1;
+//                empty_cols = 0;
+//                _buffer_len++; // if not all bytes in col is zero then increase index
+//            }
+//            else {
+//                empty_cols++;
+//            }
         }
     }
-    if (empty_cols) _next_col_dist[_buffer_len] = empty_cols;
+//    if (empty_cols) _next_col_dist[_buffer_len] = empty_cols;
 }
 
 void start_move(long steps, int8_t dir) {
@@ -331,11 +337,14 @@ void begin_print() {
     }
     else {
         // already at home position - can print
+        //LED_ON();
+
         fill_buffer();            
         _state = 4;
         _buffer_index = 0;
         _stepper.begin(RPM, MICROSTEPS);
-        start_move((_print_direction == DIR_RIGHT ? LEFT_OFFSET : RIGHT_OFFSET) + _next_col_dist[_buffer_index] * COL_SPACING, _print_direction);
+        //start_move((_print_direction == DIR_RIGHT ? LEFT_OFFSET : RIGHT_OFFSET) + _next_col_dist[_buffer_index] * COL_SPACING, _print_direction);
+        start_move(HOMING_DISTANCE, _print_direction);
     }
 }
 
@@ -344,6 +353,8 @@ void loop() {
     // checking endstops
     if (_moving_direction == DIR_RIGHT && digitalRead(STOPPER_RIGHT_PIN) == LOW) {
         stop_move(); // reset _moving_direction 
+        LED_OFF();
+
         switch (_state) {
             case 1:
                 // homing stage #1
@@ -360,6 +371,7 @@ void loop() {
     }
     else if (_moving_direction == DIR_LEFT && digitalRead(STOPPER_LEFT_PIN) == LOW) {
         stop_move(); // reset _moving_direction 
+        LED_OFF();
         switch (_state) {
             case 2:
                 // homing stage #2
@@ -378,11 +390,12 @@ void loop() {
         // not moving - can make things
         DateTime now = DS3231M.now();
         uint8_t minute = now.minute();
-        if (_last_minute != minute && 0 == now.second()) {
+        //if (_last_minute != minute && (0 == now.second() || 30 == now.second())) {
+        if (now.second() % 10 == 0) {
             //Serial.println("print");
-            sprintf(inputBuffer,"%04d-%02d-%02d %02d:%02d:%02d", now.year(),          // Use sprintf() to pretty print    //
-            now.month(), now.day(), now.hour(), now.minute(), now.second());  // date/time with leading zeros     //
-            Serial.println(inputBuffer);                                              // Display the current date/time    //
+            //sprintf(inputBuffer,"%04d-%02d-%02d %02d:%02d:%02d", now.year(),          // Use sprintf() to pretty print    //
+            //now.month(), now.day(), now.hour(), now.minute(), now.second());  // date/time with leading zeros     //
+            //Serial.println(inputBuffer);                                              // Display the current date/time    //
 
             _last_minute = minute;
             uint8_t hour = now.hour();
@@ -422,33 +435,16 @@ void loop() {
         // motor control loop - send pulse and return how long to wait until next pulse
         unsigned wait_time_micros = _stepper.nextAction();
         _steps_moved++;
-        // 0 wait time indicates the motor has stopped
-        if (wait_time_micros == 0) {
-            if (_state == 4) {
-                    // printing
-                    light_column(_buffer[_buffer_index], COL_LEN_BYTES);
-                    _buffer_index++;
-                    if (_buffer_index < _buffer_len) {
-                        start_move(_next_col_dist[_buffer_index] * COL_SPACING, _moving_direction);
-                    }
-                    else {
-                        // go left home
-                        _stepper.begin(HOMING_RPM, MICROSTEPS);
-                        start_move(HOMING_DISTANCE - _steps_moved, _moving_direction);
-                        
-                    }
-            }
-            else if (_state) {
-                _stepper.disable();       // comment out to keep motor powered
-                // error state - no endstop triggered before distance ended
-                //Serial.println("ERROR");
-               // _state = -1;
-                
-            }
+        if (_state == 4 && (_steps_moved == (_moving_direction == DIR_RIGHT ? LEFT_OFFSET : RIGHT_OFFSET - COL_SPACING))) {
+            LED_ON();
+            _state = 5;
+            _steps_moved = 0;
+            
+        } else if (_state == 5 && _steps_moved == COL_SPACING) {
+          if (_buffer_index < _buffer_len) {
+            light_column(_buffer[_buffer_index++], COL_LEN_BYTES);
+            _steps_moved = 0;
+          }
         }
     }
-    // (optional) execute other code if we have enough time
-    //if (wait_time_micros > 100){
-        // other code here
-    //}
 }
